@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>页序</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand" aria-label="页序">
+        <span class="brand-mark"><i></i><i></i><i></i></span>
+        <span>页序</span>
+      </div>
+      <button class="icon-button" id="settingsButton" type="button" title="设置" aria-label="设置">
+        <svg><use href="icons.svg#settings"></use></svg>
+      </button>
+    </header>
+
+    <main>
+      <section class="overview" aria-labelledby="overviewTitle">
+        <div>
+          <p class="eyebrow">当前窗口</p>
+          <h1 id="overviewTitle"><strong id="tabCount">0</strong> 个标签页</h1>
+        </div>
+        <p class="status" id="statusText"><span></span> 已自动整理</p>
+      </section>
+
+      <label class="search-box" for="searchInput">
+        <svg><use href="icons.svg#search"></use></svg>
+        <input id="searchInput" type="search" autocomplete="off" placeholder="搜索标题或网站" />
+        <kbd>/</kbd>
+      </label>
+
+      <section class="quick-actions" aria-label="快捷操作">
+        <button id="organizeButton" type="button">
+          <span class="action-icon mint"><svg><use href="icons.svg#sparkles"></use></svg></span>
+          <span><b>立即整理</b><small>按用途自动归组</small></span>
+        </button>
+        <button id="duplicatesButton" type="button">
+          <span class="action-icon warm"><svg><use href="icons.svg#copy-x"></use></svg></span>
+          <span><b>关闭重复</b><small id="duplicateText">没有重复页面</small></span>
+        </button>
+      </section>
+
+      <div class="section-heading">
+        <h2>标签页</h2>
+        <span id="resultCount"></span>
+      </div>
+      <div id="tabGroups" class="tab-groups" aria-live="polite"></div>
+
+      <section class="recent-section">
+        <button class="recent-heading" id="recentToggle" type="button" aria-expanded="false">
+          <span>最近关闭</span>
+          <svg><use href="icons.svg#chevron"></use></svg>
+        </button>
+        <div id="recentList" class="recent-list" hidden></div>
+      </section>
+    </main>
+
+    <dialog id="settingsDialog">
+      <div class="dialog-header">
+        <div>
+          <p class="eyebrow">偏好设置</p>
+          <h2>保持标签栏整洁</h2>
+        </div>
+        <button class="icon-button" id="closeSettings" type="button" title="关闭" aria-label="关闭设置">
+          <svg><use href="icons.svg#x"></use></svg>
+        </button>
+      </div>
+      <div class="setting-row">
+        <label for="autoOrganize"><b>自动整理</b><small>打开较多标签后自动按用途归组</small></label>
+        <input id="autoOrganize" class="switch" type="checkbox" />
+      </div>
+      <div class="setting-row">
+        <label for="collapseInactive"><b>折叠非当前组</b><small>只展开正在使用的分类</small></label>
+        <input id="collapseInactive" class="switch" type="checkbox" />
+      </div>
+      <section class="rules-section" aria-labelledby="rulesTitle">
+        <div class="rules-heading">
+          <div>
+            <h3 id="rulesTitle">分类与域名</h3>
+            <p>域名用逗号或换行分隔，自动包含其子域名。</p>
+          </div>
+          <button class="text-button" id="resetRules" type="button">恢复默认</button>
+        </div>
+        <div id="categoryRulesEditor" class="rules-editor"></div>
+        <button class="primary-button" id="saveRules" type="button">保存分类设置</button>
+      </section>
+      <p class="privacy-note">所有整理都在本机完成，不读取网页内容。</p>
+    </dialog>
+
+    <div class="toast" id="toast" role="status"></div>
+    <script src="demo-api.js"></script>
+    <script type="module" src="sidepanel.js"></script>
+  </body>
+</html>
