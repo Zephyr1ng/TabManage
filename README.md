@@ -15,7 +15,7 @@
 
 ## 界面预览
 
-<img src="images/show1.png" alt="页序标签页管家界面" width="360">
+<img src="images/show1.png" alt="页序标签页管家界面" width="100%">
 
 ## 使用
 
