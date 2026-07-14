@@ -1,19 +1,30 @@
 import {
+  CLASSIFICATION_MODES,
   DEFAULT_CATEGORY_RULES,
+  DEFAULT_CLASSIFICATION_MODE,
   classifyTab,
   findDuplicateTabIds,
+  getCategoriesForTabs,
   getCategoryRules,
   getHostname,
   getRecentClosedTabs,
   isManageableTab,
   matchesSearch,
+  normalizeClassificationMode,
   validateCategoryRules
 } from "./core.js";
 
-const DEFAULT_SETTINGS = { autoOrganize: true, collapseInactive: true, minimumTabs: 6, categoryRules: null };
-const CATEGORY_COLORS = {
-  work: "#4f7ed8", dev: "#1e9eb7", docs: "#399267", social: "#8559ba",
-  media: "#d9534f", shopping: "#d59b27", reading: "#d87436", other: "#89938c"
+const DEFAULT_SETTINGS = {
+  autoOrganize: true,
+  collapseInactive: true,
+  minimumTabs: 6,
+  categoryRules: null,
+  classificationMode: DEFAULT_CLASSIFICATION_MODE
+};
+const GROUP_COLORS = {
+  blue: "#4f7ed8", cyan: "#1e9eb7", green: "#399267", purple: "#8559ba",
+  red: "#d9534f", yellow: "#d59b27", orange: "#d87436", grey: "#89938c",
+  pink: "#c85c8e"
 };
 const state = {
   tabs: [],
@@ -28,9 +39,11 @@ let toastTimer;
 async function initialize() {
   bindEvents();
   state.settings = await chrome.storage.local.get(DEFAULT_SETTINGS);
+  state.settings.classificationMode = normalizeClassificationMode(state.settings.classificationMode);
   state.categoryRules = getCategoryRules(state.settings.categoryRules);
   $("#autoOrganize").checked = state.settings.autoOrganize;
   $("#collapseInactive").checked = state.settings.collapseInactive;
+  document.querySelector(`input[name="classificationMode"][value="${state.settings.classificationMode}"]`).checked = true;
   renderRulesEditor(state.categoryRules);
   updateStatus();
   await refresh();
@@ -63,8 +76,12 @@ function bindEvents() {
   });
   $("#autoOrganize").addEventListener("change", saveSettings);
   $("#collapseInactive").addEventListener("change", saveSettings);
+  document.querySelectorAll('input[name="classificationMode"]').forEach((input) => {
+    input.addEventListener("change", changeClassificationMode);
+  });
   $("#saveRules").addEventListener("click", saveCategoryRules);
   $("#resetRules").addEventListener("click", () => renderRulesEditor(DEFAULT_CATEGORY_RULES));
+  $("#syncGroupsButton").addEventListener("click", syncBrowserGroups);
   chrome.tabs.onCreated.addListener(refresh);
   chrome.tabs.onRemoved.addListener(refresh);
   chrome.tabs.onUpdated.addListener(refresh);
@@ -80,9 +97,16 @@ async function refresh() {
 function renderTabs() {
   const manageable = state.tabs.filter(isManageableTab);
   const visible = manageable.filter((tab) => matchesSearch(tab, state.query));
+  const mode = state.settings.classificationMode;
+  const categories = getCategoriesForTabs(visible, state.categoryRules, mode);
+  const populatedCategories = categories.filter((category) =>
+    visible.some((tab) => classifyTab(tab, state.categoryRules, mode) === category.id)
+  );
   const duplicates = findDuplicateTabIds(manageable);
   $("#tabCount").textContent = manageable.length;
-  $("#resultCount").textContent = state.query ? `${visible.length} 个结果` : `${state.categoryRules.filter((category) => visible.some((tab) => classifyTab(tab, state.categoryRules) === category.id)).length} 个分类`;
+  $("#resultCount").textContent = state.query
+    ? `${visible.length} 个结果`
+    : `${populatedCategories.length} 个分类`;
   $("#duplicateText").textContent = duplicates.length ? `${duplicates.length} 个可清理` : "没有重复页面";
   $("#duplicatesButton").disabled = duplicates.length === 0;
 
@@ -96,8 +120,8 @@ function renderTabs() {
     return;
   }
 
-  for (const category of state.categoryRules) {
-    const tabs = visible.filter((tab) => classifyTab(tab, state.categoryRules) === category.id);
+  for (const category of populatedCategories) {
+    const tabs = visible.filter((tab) => classifyTab(tab, state.categoryRules, mode) === category.id);
     if (!tabs.length) continue;
     container.append(createGroup(category, tabs));
   }
@@ -106,7 +130,7 @@ function renderTabs() {
 function createGroup(category, tabs) {
   const group = document.createElement("section");
   group.className = `group${state.collapsed.has(category.id) ? " collapsed" : ""}`;
-  group.style.setProperty("--group-color", CATEGORY_COLORS[category.id]);
+  group.style.setProperty("--group-color", GROUP_COLORS[category.color] || GROUP_COLORS.grey);
 
   const header = document.createElement("button");
   header.type = "button";
@@ -253,6 +277,26 @@ async function saveSettings() {
 function renderRulesEditor(rules) {
   const editor = $("#categoryRulesEditor");
   editor.replaceChildren();
+  const mode = state.settings.classificationMode;
+  const isDomainMode = mode === CLASSIFICATION_MODES.DOMAIN;
+  const isTitleMode = mode === CLASSIFICATION_MODES.TITLE;
+  $("#rulesTitle").textContent = isDomainMode
+    ? "网站域名分类"
+    : isTitleMode ? "分类与标题词" : "分类与域名";
+  $("#rulesDescription").textContent = isDomainMode
+    ? "相同网站域名自动归为一组，无需配置规则。"
+    : isTitleMode
+      ? "标题词用逗号或换行分隔，仅匹配页面标题。"
+      : "域名用逗号或换行分隔，自动包含其子域名。";
+  editor.hidden = isDomainMode;
+  $("#resetRules").hidden = isDomainMode;
+  $("#saveRules").hidden = isDomainMode;
+  $("#saveRules").textContent = isTitleMode ? "保存标题规则" : "保存域名规则";
+  if (isDomainMode) return;
+
+  const field = isTitleMode ? "keywords" : "domains";
+  const valueLabel = isTitleMode ? "标题词" : "域名列表";
+  const placeholder = isTitleMode ? "项目, 会议, dashboard" : "example.com, docs.example.com";
 
   for (const category of rules) {
     const item = document.createElement("div");
@@ -261,35 +305,42 @@ function renderRulesEditor(rules) {
     item.innerHTML = `
       <div class="rule-name-row">
         <span class="rule-color"></span>
-        <input class="rule-name" type="text" maxlength="12" aria-label="分类名称" />
+        <input class="rule-name" type="text" maxlength="12" />
       </div>
-      <textarea class="rule-domains" rows="2" aria-label="域名列表" placeholder="example.com, docs.example.com"></textarea>
+      <textarea class="rule-values" rows="2"></textarea>
     `;
-    item.style.setProperty("--rule-color", CATEGORY_COLORS[category.id]);
-    item.querySelector(".rule-name").value = category.label;
-    item.querySelector(".rule-domains").value = category.domains.join(", ");
+    item.style.setProperty("--rule-color", GROUP_COLORS[category.color] || GROUP_COLORS.grey);
+    const nameInput = item.querySelector(".rule-name");
+    const valuesInput = item.querySelector(".rule-values");
+    nameInput.value = category.label;
+    nameInput.setAttribute("aria-label", `${category.label}分类名称`);
+    valuesInput.value = category[field].join(", ");
+    valuesInput.placeholder = placeholder;
+    valuesInput.setAttribute("aria-label", `${category.label}${valueLabel}`);
     editor.append(item);
   }
 }
 
 function collectCategoryRules() {
+  const mode = state.settings.classificationMode;
+  const field = mode === CLASSIFICATION_MODES.TITLE ? "keywords" : "domains";
   return [...document.querySelectorAll(".rule-item")].map((item) => {
-    const defaults = DEFAULT_CATEGORY_RULES.find((category) => category.id === item.dataset.categoryId);
+    const current = state.categoryRules.find((category) => category.id === item.dataset.categoryId);
     return {
-      id: item.dataset.categoryId,
+      ...current,
       label: item.querySelector(".rule-name").value.trim(),
-      color: defaults.color,
-      domains: item.querySelector(".rule-domains").value
+      [field]: item.querySelector(".rule-values").value
         .split(/[\n,，;；]+/)
-        .map((domain) => domain.trim())
+        .map((value) => value.trim())
         .filter(Boolean)
     };
   });
 }
 
 async function saveCategoryRules() {
+  const mode = state.settings.classificationMode;
   const draft = collectCategoryRules();
-  const error = validateCategoryRules(draft);
+  const error = validateCategoryRules(draft, mode);
   if (error) {
     showToast(error);
     return;
@@ -305,6 +356,44 @@ async function saveCategoryRules() {
   const result = await chrome.runtime.sendMessage({ type: "organize", windowId: current.id });
   showToast(result?.ok ? "分类设置已保存" : "设置已保存，标签组稍后更新");
   await refresh();
+}
+
+async function changeClassificationMode(event) {
+  const mode = normalizeClassificationMode(event.target.value);
+  state.settings = { ...state.settings, classificationMode: mode };
+  await chrome.storage.local.set({ classificationMode: mode });
+  renderRulesEditor(state.categoryRules);
+  renderTabs();
+
+  const current = await chrome.windows.getCurrent();
+  const result = await chrome.runtime.sendMessage({ type: "organize", windowId: current.id });
+  $("#syncGroupsButton").classList.add("attention");
+  showToast(result?.ok ? "分类方式已切换，可同步顶部标签组" : "分类方式已保存，请同步顶部标签组");
+  await refresh();
+}
+
+async function syncBrowserGroups() {
+  const button = $("#syncGroupsButton");
+  button.disabled = true;
+  button.classList.add("syncing");
+  try {
+    const current = await chrome.windows.getCurrent();
+    const result = await chrome.runtime.sendMessage({
+      type: "organize",
+      windowId: current.id,
+      rebuild: true
+    });
+    if (!result?.ok) {
+      showToast("同步失败，请稍后重试");
+      return;
+    }
+    button.classList.remove("attention");
+    showToast(result.groupCount ? `顶部标签组已同步：${result.groupCount} 组` : "当前没有需要同步的标签组");
+    await refresh();
+  } finally {
+    button.disabled = false;
+    button.classList.remove("syncing");
+  }
 }
 
 function updateStatus() {

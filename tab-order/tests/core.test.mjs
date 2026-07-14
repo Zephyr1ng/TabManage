@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  CLASSIFICATION_MODES,
   DEFAULT_CATEGORY_RULES,
   classifyTab,
+  findRebuildableGroupIds,
   findDuplicateTabIds,
+  getCategoriesForTabs,
   getCategoryRules,
   getHostname,
   getRecentClosedTabs,
@@ -20,10 +23,15 @@ test("extracts normalized hostnames", () => {
   assert.equal(getHostname("invalid"), "");
 });
 
-test("classifies known domains and title fallbacks", () => {
-  assert.equal(classifyTab({ url: "https://github.com/openai/codex", title: "Codex" }), "dev");
-  assert.equal(classifyTab({ url: "https://example.com", title: "本周项目看板" }), "work");
-  assert.equal(classifyTab({ url: "https://example.com", title: "Example" }), "other");
+test("keeps title, domain and custom-domain modes mutually exclusive", () => {
+  const github = { url: "https://github.com/openai/codex", title: "Codex" };
+  const project = { url: "https://example.com", title: "本周项目看板" };
+
+  assert.equal(classifyTab(github, DEFAULT_CATEGORY_RULES, CLASSIFICATION_MODES.CUSTOM_DOMAIN), "dev");
+  assert.equal(classifyTab(github, DEFAULT_CATEGORY_RULES, CLASSIFICATION_MODES.TITLE), "other");
+  assert.equal(classifyTab(project, DEFAULT_CATEGORY_RULES, CLASSIFICATION_MODES.TITLE), "work");
+  assert.equal(classifyTab(project, DEFAULT_CATEGORY_RULES, CLASSIFICATION_MODES.CUSTOM_DOMAIN), "other");
+  assert.equal(classifyTab(project, DEFAULT_CATEGORY_RULES, CLASSIFICATION_MODES.DOMAIN), "domain:example.com");
 });
 
 test("supports custom category names and domain rules", () => {
@@ -34,6 +42,47 @@ test("supports custom category names and domain rules", () => {
   assert.equal(rules.find((category) => category.id === "work").label, "公司");
   assert.equal(classifyTab({ url: "https://wiki.intranet.example.com", title: "Wiki" }, rules), "work");
   assert.equal(classifyTab({ url: "https://dev.example.com", title: "Project" }, rules), "dev");
+});
+
+test("supports custom title keywords without consulting the domain", () => {
+  const rules = getCategoryRules([
+    { id: "work", label: "客户项目", keywords: ["客户甲"], domains: [] }
+  ]);
+  const tab = { url: "https://unrelated.example.com", title: "客户甲需求清单" };
+  assert.equal(classifyTab(tab, rules, CLASSIFICATION_MODES.TITLE), "work");
+  assert.equal(classifyTab(tab, rules, CLASSIFICATION_MODES.CUSTOM_DOMAIN), "other");
+});
+
+test("builds one dynamic category per website domain", () => {
+  const tabs = [
+    { url: "https://github.com/a" },
+    { url: "https://www.github.com/b" },
+    { url: "https://docs.example.com/c" }
+  ];
+  const categories = getCategoriesForTabs(tabs, DEFAULT_CATEGORY_RULES, CLASSIFICATION_MODES.DOMAIN);
+  assert.deepEqual(categories.map((category) => category.label), ["docs.example.com", "github.com"]);
+});
+
+test("rebuilds only recorded or recognizable plugin groups", () => {
+  const tabs = [
+    { id: 1, groupId: 10, url: "https://example.com/a" },
+    { id: 2, groupId: 11, url: "https://private.example.com/b" },
+    { id: 3, groupId: 12, url: "https://github.com/a" },
+    { id: 4, groupId: 12, url: "https://www.github.com/b" },
+    { id: 5, groupId: 13, url: "https://custom.example.com/a" }
+  ];
+  const groups = [
+    { id: 10, title: "工作", color: "blue" },
+    { id: 11, title: "工作", color: "red" },
+    { id: 12, title: "github.com", color: "purple" },
+    { id: 13, title: "旧自定义分类", color: "green" }
+  ];
+  const records = [{ id: 13, title: "旧自定义分类", color: "green", categoryId: "docs" }];
+
+  assert.deepEqual(
+    findRebuildableGroupIds(tabs, groups, records, DEFAULT_CATEGORY_RULES),
+    [10, 12, 13]
+  );
 });
 
 test("prefers the most specific custom domain", () => {
@@ -62,6 +111,13 @@ test("rejects duplicate labels and exact domains across categories", () => {
   duplicateDomains[0].domains = ["example.com"];
   duplicateDomains[1].domains = ["https://www.example.com/path"];
   assert.match(validateCategoryRules(duplicateDomains), /同时出现在/);
+});
+
+test("rejects duplicate title keywords across categories", () => {
+  const rules = DEFAULT_CATEGORY_RULES.map((category) => ({ ...category, keywords: [] }));
+  rules[0].keywords = ["Project"];
+  rules[1].keywords = ["project"];
+  assert.match(validateCategoryRules(rules, CLASSIFICATION_MODES.TITLE), /标题词/);
 });
 
 test("leaves pinned and browser-internal tabs unmanaged", () => {

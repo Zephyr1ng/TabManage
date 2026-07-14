@@ -1,7 +1,13 @@
 (() => {
   if (globalThis.chrome?.tabs || !new URLSearchParams(location.search).has("demo")) return;
 
-  let settings = { autoOrganize: true, collapseInactive: true, minimumTabs: 6, categoryRules: null };
+  let settings = {
+    autoOrganize: true,
+    collapseInactive: true,
+    minimumTabs: 6,
+    categoryRules: null,
+    classificationMode: "customDomain"
+  };
   let mockTabs = [
     { id: 1, title: "产品迭代看板 - 飞书", url: "https://example.feishu.cn/base/plan", active: true, pinned: false, lastAccessed: 90 },
     { id: 2, title: "Q3 用户访谈记录", url: "https://www.notion.so/interviews", active: false, pinned: false, lastAccessed: 80 },

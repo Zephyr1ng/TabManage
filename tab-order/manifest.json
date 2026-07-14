@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "页序 · 标签页管家",
   "description": "自动整理、搜索和管理过多的浏览器标签页。",
-  "version": "1.1.1",
+  "version": "1.2.1",
   "minimum_chrome_version": "116",
   "permissions": [
     "tabs",

@@ -1,10 +1,20 @@
-import { DEFAULT_CATEGORY_RULES, classifyTab, getCategoryRules, isManageableTab } from "./core.js";
+import {
+  DEFAULT_CATEGORY_RULES,
+  DEFAULT_CLASSIFICATION_MODE,
+  classifyTab,
+  findRebuildableGroupIds,
+  getCategoriesForTabs,
+  getCategoryRules,
+  isManageableTab,
+  normalizeClassificationMode
+} from "./core.js";
 
 const DEFAULT_SETTINGS = {
   autoOrganize: true,
   collapseInactive: true,
   minimumTabs: 6,
-  categoryRules: null
+  categoryRules: null,
+  classificationMode: DEFAULT_CLASSIFICATION_MODE
 };
 const pendingWindows = new Map();
 
@@ -29,7 +39,7 @@ chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "organize") {
-    organizeWindow(message.windowId, true)
+    organizeWindow(message.windowId, true, Boolean(message.rebuild))
       .then((result) => sendResponse({ ok: true, ...result }))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
@@ -46,18 +56,34 @@ function scheduleOrganize(windowId, delay = 900) {
   }, delay));
 }
 
-async function organizeWindow(windowId, force = false) {
-  const settings = await chrome.storage.local.get(DEFAULT_SETTINGS);
+async function organizeWindow(windowId, force = false, rebuild = false) {
+  const settings = await chrome.storage.local.get({
+    ...DEFAULT_SETTINGS,
+    managedGroupRecords: []
+  });
   if (!force && !settings.autoOrganize) return { groupCount: 0 };
   const categoryRules = getCategoryRules(settings.categoryRules);
+  const classificationMode = normalizeClassificationMode(settings.classificationMode);
 
   let tabs = await chrome.tabs.query({ windowId });
   let manageable = tabs.filter(isManageableTab);
   if (!force && manageable.length < settings.minimumTabs) return { groupCount: 0 };
 
-  const groups = await chrome.tabGroups.query({ windowId });
+  let groups = await chrome.tabGroups.query({ windowId });
   const storedGroups = await chrome.storage.session.get({ managedGroups: [], managedGroupIds: [] });
-  const records = new Map(storedGroups.managedGroups.map((record) => [record.id, record.categoryId]));
+  const groupsById = new Map(groups.map((group) => [group.id, group]));
+  const records = new Map();
+  for (const record of storedGroups.managedGroups) {
+    if (groupsById.has(record.id)) records.set(record.id, record.categoryId);
+  }
+  for (const record of settings.managedGroupRecords) {
+    const group = groupsById.get(record.id);
+    if (
+      group &&
+      record.title === group.title &&
+      (!record.color || record.color === group.color)
+    ) records.set(record.id, record.categoryId);
+  }
   const labelsByCategory = new Map(
     categoryRules.flatMap((category) => {
       const defaultLabel = DEFAULT_CATEGORY_RULES.find((item) => item.id === category.id)?.label;
@@ -68,6 +94,30 @@ async function organizeWindow(windowId, force = false) {
     if (!records.has(group.id) && storedGroups.managedGroupIds.includes(group.id)) {
       const categoryId = labelsByCategory.get(group.title);
       if (categoryId) records.set(group.id, categoryId);
+    }
+  }
+
+  let reclaimedCount = 0;
+  if (rebuild) {
+    const detectedIds = new Set([
+      ...records.keys(),
+      ...findRebuildableGroupIds(
+        manageable,
+        groups,
+        settings.managedGroupRecords,
+        categoryRules
+      )
+    ]);
+    const rebuildTabIds = manageable
+      .filter((tab) => detectedIds.has(tab.groupId))
+      .map((tab) => tab.id);
+    if (rebuildTabIds.length) {
+      await chrome.tabs.ungroup(rebuildTabIds);
+      reclaimedCount = detectedIds.size;
+      detectedIds.forEach((groupId) => records.delete(groupId));
+      tabs = await chrome.tabs.query({ windowId });
+      manageable = tabs.filter(isManageableTab);
+      groups = await chrome.tabGroups.query({ windowId });
     }
   }
   const managedGroups = new Map(
@@ -81,7 +131,7 @@ async function organizeWindow(windowId, force = false) {
   const misplacedIds = manageable
     .filter((tab) => {
       const managed = managedGroupById.get(tab.groupId);
-      return managed && classifyTab(tab, categoryRules) !== managed.categoryId;
+      return managed && classifyTab(tab, categoryRules, classificationMode) !== managed.categoryId;
     })
     .map((tab) => tab.id);
   if (misplacedIds.length) {
@@ -90,13 +140,16 @@ async function organizeWindow(windowId, force = false) {
     manageable = tabs.filter(isManageableTab);
   }
   const activeTab = tabs.find((tab) => tab.active);
-  const activeCategory = activeTab ? classifyTab(activeTab, categoryRules) : null;
+  const activeCategory = activeTab
+    ? classifyTab(activeTab, categoryRules, classificationMode)
+    : null;
+  const categories = getCategoriesForTabs(manageable, categoryRules, classificationMode);
   let groupCount = 0;
 
-  for (const category of categoryRules) {
+  for (const category of categories) {
     const existing = managedGroups.get(category.id);
     const candidates = manageable.filter((tab) => {
-      if (classifyTab(tab, categoryRules) !== category.id) return false;
+      if (classifyTab(tab, categoryRules, classificationMode) !== category.id) return false;
       return tab.groupId === chrome.tabGroups.TAB_GROUP_ID_NONE || tab.groupId === existing?.id;
     });
 
@@ -117,12 +170,23 @@ async function organizeWindow(windowId, force = false) {
     }
   }
 
-  const liveGroupIds = new Set((await chrome.tabGroups.query({})).map((group) => group.id));
+  const liveGroups = await chrome.tabGroups.query({});
+  const liveGroupsById = new Map(liveGroups.map((group) => [group.id, group]));
   await chrome.storage.session.set({
     managedGroups: [...records]
-      .filter(([groupId]) => liveGroupIds.has(groupId))
+      .filter(([groupId]) => liveGroupsById.has(groupId))
       .map(([id, categoryId]) => ({ id, categoryId })),
     managedGroupIds: []
   });
-  return { groupCount };
+  await chrome.storage.local.set({
+    managedGroupRecords: [...records]
+      .filter(([groupId]) => liveGroupsById.has(groupId))
+      .map(([id, categoryId]) => ({
+        id,
+        categoryId,
+        title: liveGroupsById.get(id).title || "",
+        color: liveGroupsById.get(id).color
+      }))
+  });
+  return { groupCount, reclaimedCount };
 }

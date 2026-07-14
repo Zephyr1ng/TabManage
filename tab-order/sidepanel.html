@@ -36,7 +36,7 @@
       <section class="quick-actions" aria-label="快捷操作">
         <button id="organizeButton" type="button">
           <span class="action-icon mint"><svg><use href="icons.svg#sparkles"></use></svg></span>
-          <span><b>立即整理</b><small>按用途自动归组</small></span>
+          <span><b>立即整理</b><small>按所选方式归组</small></span>
         </button>
         <button id="duplicatesButton" type="button">
           <span class="action-icon warm"><svg><use href="icons.svg#copy-x"></use></svg></span>
@@ -77,11 +77,22 @@
         <label for="collapseInactive"><b>折叠非当前组</b><small>只展开正在使用的分类</small></label>
         <input id="collapseInactive" class="switch" type="checkbox" />
       </div>
+      <fieldset class="mode-setting">
+        <legend>分类方式</legend>
+        <button class="sync-groups-button" id="syncGroupsButton" type="button" title="同步浏览器标签组" aria-label="同步浏览器标签组">
+          <svg><use href="icons.svg#rotate"></use></svg>
+        </button>
+        <div class="mode-control">
+          <label><input type="radio" name="classificationMode" value="title" /><span>网站标题</span></label>
+          <label><input type="radio" name="classificationMode" value="domain" /><span>网站域名</span></label>
+          <label><input type="radio" name="classificationMode" value="customDomain" /><span>自定义域名</span></label>
+        </div>
+      </fieldset>
       <section class="rules-section" aria-labelledby="rulesTitle">
         <div class="rules-heading">
           <div>
             <h3 id="rulesTitle">分类与域名</h3>
-            <p>域名用逗号或换行分隔，自动包含其子域名。</p>
+            <p id="rulesDescription">域名用逗号或换行分隔，自动包含其子域名。</p>
           </div>
           <button class="text-button" id="resetRules" type="button">恢复默认</button>
         </div>

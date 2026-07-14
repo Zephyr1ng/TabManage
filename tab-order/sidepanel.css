@@ -13,6 +13,8 @@
 
 * { box-sizing: border-box; }
 
+html, body { overflow-x: hidden; }
+
 body {
   margin: 0;
   min-width: 300px;
@@ -262,6 +264,21 @@ dialog::backdrop { background: rgba(23, 33, 28, .28); }
 .switch::after { content: ""; display: block; width: 16px; height: 16px; margin: 2px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.2); transition: transform .15s; }
 .switch:checked { background: var(--accent); }
 .switch:checked::after { transform: translateX(14px); }
+.mode-setting { margin: 0; padding: 14px 18px 16px; position: relative; border: 0; border-bottom: 1px solid #eef0ee; }
+.mode-setting legend { padding: 0; margin-bottom: 9px; font-size: 12px; font-weight: 700; }
+.sync-groups-button { width: 28px; height: 28px; padding: 0; display: grid; place-items: center; position: absolute; top: 7px; right: 15px; border: 0; border-radius: 5px; background: transparent; color: #78827a; cursor: pointer; }
+.sync-groups-button:hover { background: #e7ebe8; color: var(--ink); }
+.sync-groups-button.attention { background: var(--accent-soft); color: var(--accent); }
+.sync-groups-button:disabled { opacity: .55; cursor: default; }
+.sync-groups-button svg { width: 15px; height: 15px; }
+.sync-groups-button.syncing svg { animation: sync-spin .7s linear infinite; }
+@keyframes sync-spin { to { transform: rotate(360deg); } }
+.mode-control { height: 34px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 3px; border-radius: 6px; background: #eef1ee; }
+.mode-control label { min-width: 0; cursor: pointer; }
+.mode-control input { position: absolute; opacity: 0; pointer-events: none; }
+.mode-control span { height: 28px; display: grid; place-items: center; border-radius: 4px; color: #707a72; white-space: nowrap; font-size: 10px; }
+.mode-control input:checked + span { background: #fff; color: var(--ink); font-weight: 680; box-shadow: 0 1px 3px rgba(23, 33, 28, .12); }
+.mode-control input:focus-visible + span { outline: 2px solid #54a58b; outline-offset: 1px; }
 .rules-section { padding: 17px 18px 18px; border-bottom: 1px solid #eef0ee; }
 .rules-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 .rules-heading h3 { margin: 0 0 4px; font-size: 12px; }
@@ -269,15 +286,16 @@ dialog::backdrop { background: rgba(23, 33, 28, .28); }
 .text-button { padding: 2px 0; flex: 0 0 auto; border: 0; background: transparent; color: var(--accent); font-size: 10px; cursor: pointer; }
 .text-button:hover { text-decoration: underline; }
 .rules-editor { display: grid; }
+.rules-editor[hidden] { display: none; }
 .rule-item { padding: 10px 0; border-bottom: 1px solid #eef0ee; }
 .rule-item:last-child { border-bottom: 0; }
 .rule-name-row { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
 .rule-color { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--rule-color); }
-.rule-name, .rule-domains { width: 100%; border: 1px solid #dce1dd; border-radius: 5px; background: #fff; color: var(--ink); outline: 0; }
-.rule-name:focus, .rule-domains:focus { border-color: #54a58b; box-shadow: 0 0 0 2px rgba(19, 121, 91, .08); }
+.rule-name, .rule-values { width: 100%; border: 1px solid #dce1dd; border-radius: 5px; background: #fff; color: var(--ink); outline: 0; }
+.rule-name:focus, .rule-values:focus { border-color: #54a58b; box-shadow: 0 0 0 2px rgba(19, 121, 91, .08); }
 .rule-name { height: 30px; padding: 0 8px; font-size: 11px; font-weight: 650; }
-.rule-domains { min-height: 50px; padding: 7px 8px; resize: vertical; font-size: 9px; line-height: 1.45; }
-.rule-domains::placeholder { color: #a1a8a3; }
+.rule-values { min-height: 50px; padding: 7px 8px; resize: vertical; font-size: 9px; line-height: 1.45; }
+.rule-values::placeholder { color: #a1a8a3; }
 .primary-button { width: 100%; height: 36px; margin-top: 10px; border: 0; border-radius: 6px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 680; cursor: pointer; }
 .primary-button:hover { background: #0f684d; }
 .privacy-note { margin: 0; padding: 14px 18px 16px; color: #7e8780; font-size: 9px; }
@@ -310,4 +328,5 @@ dialog::backdrop { background: rgba(23, 33, 28, .28); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
+  .sync-groups-button.syncing svg { animation: none; }
 }

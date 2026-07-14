@@ -9,6 +9,14 @@ const CATEGORY_DEFINITIONS = [
   { id: "other", label: "其他", color: "grey" }
 ];
 
+export const CLASSIFICATION_MODES = {
+  TITLE: "title",
+  DOMAIN: "domain",
+  CUSTOM_DOMAIN: "customDomain"
+};
+
+export const DEFAULT_CLASSIFICATION_MODE = CLASSIFICATION_MODES.CUSTOM_DOMAIN;
+
 const DEFAULT_DOMAIN_RULES = {
   work: [
     "feishu.cn", "larksuite.com", "dingtalk.com", "notion.so", "airtable.com",
@@ -40,11 +48,6 @@ const DEFAULT_DOMAIN_RULES = {
   ]
 };
 
-export const DEFAULT_CATEGORY_RULES = CATEGORY_DEFINITIONS.map((category) => ({
-  ...category,
-  domains: [...(DEFAULT_DOMAIN_RULES[category.id] || [])]
-}));
-
 const TITLE_RULES = {
   work: ["项目", "任务", "看板", "会议", "dashboard", "project", "calendar"],
   dev: ["api", "developer", "代码", "仓库", "console", "documentation", "reference"],
@@ -54,6 +57,12 @@ const TITLE_RULES = {
   shopping: ["购物", "商品", "订单", "shop", "cart", "product"],
   reading: ["新闻", "博客", "文章", "news", "blog", "article"]
 };
+
+export const DEFAULT_CATEGORY_RULES = CATEGORY_DEFINITIONS.map((category) => ({
+  ...category,
+  domains: [...(DEFAULT_DOMAIN_RULES[category.id] || [])],
+  keywords: [...(TITLE_RULES[category.id] || [])]
+}));
 
 export function getHostname(url = "") {
   try {
@@ -87,6 +96,25 @@ export function parseDomainList(value = "") {
   return [...new Set(entries.map(normalizeDomain).filter(Boolean))];
 }
 
+export function parseKeywordList(value = "") {
+  const entries = Array.isArray(value) ? value : value.split(/[\n,，;；]+/);
+  const seen = new Set();
+  return entries
+    .map((keyword) => String(keyword).trim())
+    .filter((keyword) => {
+      const normalized = keyword.toLowerCase();
+      if (!normalized || seen.has(normalized)) return false;
+      seen.add(normalized);
+      return true;
+    });
+}
+
+export function normalizeClassificationMode(mode) {
+  return Object.values(CLASSIFICATION_MODES).includes(mode)
+    ? mode
+    : DEFAULT_CLASSIFICATION_MODE;
+}
+
 export function getCategoryRules(storedRules) {
   const storedById = new Map(
     (Array.isArray(storedRules) ? storedRules : []).map((category) => [category?.id, category])
@@ -104,13 +132,16 @@ export function getCategoryRules(storedRules) {
       claimedDomains.add(domain);
       return true;
     });
-    return { id: defaults.id, label, color: defaults.color, domains };
+    const sourceKeywords = stored && Array.isArray(stored.keywords) ? stored.keywords : defaults.keywords;
+    const keywords = parseKeywordList(sourceKeywords);
+    return { id: defaults.id, label, color: defaults.color, domains, keywords };
   });
 }
 
-export function validateCategoryRules(rules) {
+export function validateCategoryRules(rules, mode = CLASSIFICATION_MODES.CUSTOM_DOMAIN) {
   const labels = new Set();
   const domains = new Map();
+  const keywords = new Map();
 
   for (const category of rules) {
     const label = category.label.trim();
@@ -118,35 +149,113 @@ export function validateCategoryRules(rules) {
     if (labels.has(label)) return `分类名称“${label}”重复`;
     labels.add(label);
 
-    for (const rawDomain of category.domains) {
-      const domain = normalizeDomain(rawDomain);
-      if (!domain) return `“${rawDomain}”不是有效域名`;
-      if (domains.has(domain)) return `域名 ${domain} 同时出现在“${domains.get(domain)}”和“${label}”中`;
-      domains.set(domain, label);
+    if (mode === CLASSIFICATION_MODES.CUSTOM_DOMAIN) {
+      for (const rawDomain of category.domains) {
+        const domain = normalizeDomain(rawDomain);
+        if (!domain) return `“${rawDomain}”不是有效域名`;
+        if (domains.has(domain)) return `域名 ${domain} 同时出现在“${domains.get(domain)}”和“${label}”中`;
+        domains.set(domain, label);
+      }
+    }
+
+    if (mode === CLASSIFICATION_MODES.TITLE) {
+      for (const rawKeyword of category.keywords) {
+        const keyword = rawKeyword.trim().toLowerCase();
+        if (!keyword) continue;
+        if (keywords.has(keyword)) return `标题词“${rawKeyword}”同时出现在“${keywords.get(keyword)}”和“${label}”中`;
+        keywords.set(keyword, label);
+      }
     }
   }
 
   return "";
 }
 
-export function classifyTab(tab, categoryRules = DEFAULT_CATEGORY_RULES) {
+export function classifyTab(
+  tab,
+  categoryRules = DEFAULT_CATEGORY_RULES,
+  mode = DEFAULT_CLASSIFICATION_MODE
+) {
+  const classificationMode = normalizeClassificationMode(mode);
   const hostname = getHostname(tab.url);
   const title = (tab.title || "").toLowerCase();
 
-  const domainMatch = categoryRules
-    .flatMap((category) => category.domains.map((domain) => ({ categoryId: category.id, domain })))
-    .filter(({ domain }) => hostname === domain || hostname.endsWith(`.${domain}`))
-    .sort((a, b) => b.domain.length - a.domain.length)[0];
-  if (domainMatch) {
-    return domainMatch.categoryId;
+  if (classificationMode === CLASSIFICATION_MODES.DOMAIN) {
+    return `domain:${hostname || "local-files"}`;
+  }
+
+  if (classificationMode === CLASSIFICATION_MODES.CUSTOM_DOMAIN) {
+    const domainMatch = categoryRules
+      .flatMap((category) => category.domains.map((domain) => ({ categoryId: category.id, domain })))
+      .filter(({ domain }) => hostname === domain || hostname.endsWith(`.${domain}`))
+      .sort((a, b) => b.domain.length - a.domain.length)[0];
+    return domainMatch?.categoryId || "other";
   }
 
   for (const category of categoryRules) {
-    const keywords = TITLE_RULES[category.id] || [];
-    if (keywords.some((keyword) => title.includes(keyword))) return category.id;
+    if (category.keywords.some((keyword) => title.includes(keyword.toLowerCase()))) {
+      return category.id;
+    }
   }
 
   return "other";
+}
+
+export function getCategoriesForTabs(
+  tabs,
+  categoryRules = DEFAULT_CATEGORY_RULES,
+  mode = DEFAULT_CLASSIFICATION_MODE
+) {
+  const classificationMode = normalizeClassificationMode(mode);
+  if (classificationMode !== CLASSIFICATION_MODES.DOMAIN) return categoryRules;
+
+  const colors = ["blue", "cyan", "green", "yellow", "orange", "red", "pink", "purple", "grey"];
+  const categories = new Map();
+  for (const tab of tabs) {
+    const hostname = getHostname(tab.url);
+    const id = classifyTab(tab, categoryRules, classificationMode);
+    if (categories.has(id)) continue;
+    const hash = [...(hostname || "local-files")]
+      .reduce((total, character) => ((total * 31) + character.charCodeAt(0)) >>> 0, 0);
+    categories.set(id, {
+      id,
+      label: hostname || "本地文件",
+      color: colors[hash % colors.length],
+      domains: [],
+      keywords: []
+    });
+  }
+  return [...categories.values()].sort((a, b) => a.label.localeCompare(b.label));
+}
+
+export function findRebuildableGroupIds(
+  tabs,
+  groups,
+  managedRecords = [],
+  categoryRules = DEFAULT_CATEGORY_RULES
+) {
+  const records = new Map(managedRecords.map((record) => [record.id, record]));
+  const knownLabels = new Map(
+    [...DEFAULT_CATEGORY_RULES, ...categoryRules]
+      .map((category) => [category.label, category.color])
+  );
+
+  return groups
+    .filter((group) => {
+      const groupTabs = tabs.filter((tab) => tab.groupId === group.id);
+      if (!groupTabs.length) return false;
+
+      const record = records.get(group.id);
+      if (
+        record?.title === group.title &&
+        (!record.color || record.color === group.color)
+      ) return true;
+      if (knownLabels.get(group.title) === group.color) return true;
+
+      const normalizedTitle = normalizeDomain(group.title || "");
+      return Boolean(normalizedTitle) && groupTabs.every((tab) => getHostname(tab.url) === normalizedTitle);
+    })
+    .map((group) => group.id);
 }
 
 export function normalizeUrl(url = "") {
